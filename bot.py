@@ -1,20 +1,33 @@
 import os
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import telegram
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes, CommandHandler
 import requests
 
 # ==================== БЕЗОПАСНО ====================
-# Ключи берутся из настроек хостинга, а не из кода
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 API_KEY        = os.environ.get("API_KEY")
 API_URL        = "https://llmcod.ru/v1/chat/completions"
 MODEL_NAME     = "qwen3-coder-30b-a3b-instruct"
 # ===================================================
 
+# --- Фейковый веб-сервер для Render (чтобы он видел порт) ---
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b"Bot is running!")
+
+def run_health_check():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    server.serve_forever()
+# -----------------------------------------------------------
 
 async def start(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Я твой ИИ-бот 🤖\nНапиши любой вопрос — отвечу.")
-
 
 async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
@@ -46,11 +59,13 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
 
     await update.message.reply_text(reply)
 
-
 if __name__ == "__main__":
     if not TELEGRAM_TOKEN or not API_KEY:
         print("❌ Ошибка: не заданы переменные окружения TELEGRAM_TOKEN и API_KEY")
         exit(1)
+
+    # Запускаем фейковый сервер в отдельном потоке
+    threading.Thread(target=run_health_check, daemon=True).start()
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
