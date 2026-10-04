@@ -84,7 +84,8 @@ async def send_image(update, context, prompt):
     url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/ai/run/{CF_MODEL}"
     headers = {"Authorization": f"Bearer {CF_API_TOKEN}",
                "Content-Type": "application/json"}
-    payload = {"prompt": prompt, "num_steps": 4}
+    # Убрали num_steps — Cloudflare его больше не принимает
+    payload = {"prompt": prompt}
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=60)
         result = r.json()
@@ -119,14 +120,15 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
 
     if text == "💬 Чат":
         user_modes[chat_id] = "chat"
-        await update.message.reply_text("💬 Режим чата. Пиши вопрос!", reply_markup=main_keyboard())
+        await update.message.reply_text("💬 Режим чата. Пиши вопрос!",
+                                        reply_markup=main_keyboard())
         return
     if text == "🎨 Картинка":
         user_modes[chat_id] = "image"
         await update.message.reply_text(
-            "🎨 Опиши ПОДРОБНО, что нарисовать.\n\n"
-            "❌ Плохо: «кот в космосе»\n"
-            "✅ Хорошо: «реалистичный белый кот в скафандре на фоне звёздного неба, планета Земля, яркие звёзды, 8k»",
+            "🎨 Опиши, что нарисовать.\n\n"
+            "❌ Плохо: «кот»\n"
+            "✅ Хорошо: «реалистичный белый кот в скафандре, космос, звёзды, 8k»",
             reply_markup=main_keyboard())
         return
     if text == "🔁 Перегенерировать":
@@ -135,7 +137,8 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
             await update.message.reply_text("❓ Пока нечего перегенерировать.",
                                             reply_markup=main_keyboard())
             return
-        await update.message.reply_text(f"🔁 Перегенерирую: «{last}»...", reply_markup=main_keyboard())
+        await update.message.reply_text(f"🔁 Перегенерирую: «{last}»...",
+                                        reply_markup=main_keyboard())
         await send_image(update, context, last)
         return
     if text == "📚 Википедия":
@@ -151,11 +154,12 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
 
     if user_modes[chat_id] == "image":
         words = text.split()
-        if len(words) < 5 or len(text) < 30:
+        # Лимит снижен: от 3 слов и от 15 символов
+        if len(words) < 3 or len(text) < 15:
             await update.message.reply_text(
                 "⚠ Слишком короткий запрос.\n\n"
-                "❌ Плохо: «картошка»\n"
-                "✅ Хорошо: «фотография картофеля на деревянном столе, реалистично, овощ, коричневая кожура, 8k»",
+                "❌ Плохо: «кот»\n"
+                "✅ Хорошо: «реалистичный белый кот, космос, звёзды, 8k»",
                 reply_markup=main_keyboard())
             return
         user_modes[chat_id] = "chat"
