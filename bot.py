@@ -25,7 +25,7 @@ SYSTEM_PROMPT = (
 
 user_histories = {}
 MAX_HISTORY = 10
-user_modes = {}   # какой режим выбран у пользователя: chat / image / wiki
+user_modes = {}
 # ====================================================
 
 
@@ -89,7 +89,6 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
     text = update.message.text
     chat_id = update.effective_chat.id
 
-    # инициализация
     if chat_id not in user_histories:
         user_histories[chat_id] = []
     if chat_id not in user_modes:
@@ -107,7 +106,12 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
     if text == "🎨 Картинка":
         user_modes[chat_id] = "image"
         await update.message.reply_text(
-            "🎨 Опиши, что нарисовать (одним сообщением).",
+            "🎨 Опиши ПОДРОБНО, что нарисовать.\n\n"
+            "Чем больше деталей — тем лучше результат!\n\n"
+            "❌ Плохо: «кот в космосе»\n"
+            "✅ Хорошо: «реалистичный белый кот в скафандре "
+            "на фоне звёздного неба, планета Земля, яркие звёзды, "
+            "детализированно, 8k, кинематографично»",
             reply_markup=main_keyboard()
         )
         return
@@ -131,6 +135,20 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
 
     # --- Режим КАРТИНКА ---
     if user_modes[chat_id] == "image":
+        words = text.split()
+        if len(words) < 5 or len(text) < 30:
+            await update.message.reply_text(
+                "⚠ Твой запрос слишком короткий.\n\n"
+                "Чем подробнее опишешь — тем лучше получится картинка.\n\n"
+                "❌ Плохо: «кот в космосе»\n"
+                "✅ Хорошо: «реалистичный белый кот в скафандре "
+                "на фоне звёздного неба, планета Земля, яркие звёзды, "
+                "детализированно, 8k, кинематографично»\n\n"
+                "Напиши новый запрос подробнее:",
+                reply_markup=main_keyboard()
+            )
+            return
+
         user_modes[chat_id] = "chat"
         await context.bot.send_chat_action(
             chat_id=chat_id,
@@ -161,7 +179,7 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
         )
         return
 
-    # --- Режим ЧАТ (по умолчанию) ---
+    # --- Режим ЧАТ ---
     await context.bot.send_chat_action(chat_id=chat_id,
                                        action=telegram.constants.ChatAction.TYPING)
 
