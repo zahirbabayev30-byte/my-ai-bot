@@ -1,5 +1,6 @@
 import os
 import threading
+import random
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import quote
 
@@ -24,21 +25,21 @@ SYSTEM_PROMPT = (
 )
 
 user_histories = {}
-MAX_HISTORY = 10
 user_modes = {}
+user_last_prompt = {}   # последний промпт для картинки
+MAX_HISTORY = 10
 # ====================================================
 
 
-# ---------- Кнопки меню ----------
 def main_keyboard():
     buttons = [
         [KeyboardButton("💬 Чат"), KeyboardButton("🎨 Картинка")],
-        [KeyboardButton("📚 Википедия"), KeyboardButton("🧹 Очистить")],
+        [KeyboardButton("🔁 Перегенерировать"), KeyboardButton("📚 Википедия")],
+        [KeyboardButton("🧹 Очистить")],
     ]
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
 
-# ---------- Фейковый сервер для Render ----------
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -52,7 +53,6 @@ def run_health_check():
     HTTPServer(('0.0.0.0', port), HealthCheckHandler).serve_forever()
 
 
-# ---------- Поиск в Википедии ----------
 def search_wikipedia(query, lang="ru"):
     try:
         url = f"https://{lang}.wikipedia.org/w/api.php"
@@ -72,7 +72,34 @@ def search_wikipedia(query, lang="ru"):
         return None
 
 
-# ---------- /start ----------
+def make_image_url(prompt):
+    """Формирует URL картинки с небольшим случайным элементом для разнообразия."""
+    enhanced = prompt + ", high quality, detailed, 4k, photorealistic"
+    encoded = quote(enhanced)
+    seed = random.randint(1, 999999)
+    return (
+        f"https://image.pollinations.ai/prompt/{encoded}"
+        f"?width=1280&height=1280&nologo=true&enhance=true&seed={seed}"
+    )
+
+
+async def send_image(update, context, prompt):
+    """Общая функция для отправки картинки."""
+    await context.bot.send_chat_action(
+        chat_id=update.effective_chat.id,
+        action=telegram.constants.ChatAction.UPLOAD_PHOTO
+    )
+    try:
+        await update.message.reply_photo(
+            photo=make_image_url(prompt),
+            caption=f"🎨 {prompt}",
+            reply_markup=main_keyboard()
+        )
+    except Exception as e:
+        await update.message.reply_text(f"⚠ Не удалось нарисовать: {e}",
+                                        reply_markup=main_keyboard())
+
+
 async def start(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_histories[chat_id] = []
@@ -84,7 +111,6 @@ async def start(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ---------- Основной обработчик ----------
 async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     chat_id = update.effective_chat.id
@@ -93,21 +119,21 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
         user_histories[chat_id] = []
     if chat_id not in user_modes:
         user_modes[chat_id] = "chat"
+    if chat_id not in user_last_prompt:
+        user_last_prompt[chat_id] = None
 
-    # --- Обработка кнопок ---
+    # --- Кнопки ---
     if text == "💬 Чат":
         user_modes[chat_id] = "chat"
-        await update.message.reply_text(
-            "💬 Режим чата включён. Пиши вопрос!",
-            reply_markup=main_keyboard()
-        )
+        await update.message.reply_text("💬 Режим чата. Пиши вопрос!",
+                                        reply_markup=main_keyboard())
         return
 
     if text == "🎨 Картинка":
         user_modes[chat_id] = "image"
         await update.message.reply_text(
             "🎨 Опиши ПОДРОБНО, что нарисовать.\n\n"
-            "Чем больше деталей — тем лучше результат!\n\n"
+            "Чем больше деталей — тем лучше!\n\n"
             "❌ Плохо: «кот в космосе»\n"
             "✅ Хорошо: «реалистичный белый кот в скафандре "
             "на фоне звёздного неба, планета Земля, яркие звёзды, "
@@ -116,21 +142,34 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
         )
         return
 
-    if text == "📚 Википедия":
-        user_modes[chat_id] = "wiki"
+    if text == "🔁 Перегенерировать":
+        last = user_last_prompt.get(chat_id)
+        if not last:
+            await update.message.reply_text(
+                "❓ Пока нечего перегенерировать. Сначала нажми «🎨 Картинка» и опиши, что нарисовать.",
+                reply_markup=main_keyboard()
+            )
+            return
         await update.message.reply_text(
-            "📚 Введи запрос для поиска в Википедии.",
+            f"🔁 Перегенерирую: «{last}»\n\n"
+            "Это может занять 10–30 секунд...",
             reply_markup=main_keyboard()
         )
+        await send_image(update, context, last)
+        return
+
+    if text == "📚 Википедия":
+        user_modes[chat_id] = "wiki"
+        await update.message.reply_text("📚 Введи запрос для поиска.",
+                                        reply_markup=main_keyboard())
         return
 
     if text == "🧹 Очистить":
         user_histories[chat_id] = []
         user_modes[chat_id] = "chat"
-        await update.message.reply_text(
-            "🧹 История очищена!",
-            reply_markup=main_keyboard()
-        )
+        user_last_prompt[chat_id] = None
+        await update.message.reply_text("🧹 Всё очищено!",
+                                        reply_markup=main_keyboard())
         return
 
     # --- Режим КАРТИНКА ---
@@ -150,23 +189,8 @@ async def handle_message(update: telegram.Update, context: ContextTypes.DEFAULT_
             return
 
         user_modes[chat_id] = "chat"
-        await context.bot.send_chat_action(
-            chat_id=chat_id,
-            action=telegram.constants.ChatAction.UPLOAD_PHOTO
-        )
-        enhanced = text + ", high quality, detailed, 4k, photorealistic"
-        encoded = quote(enhanced)
-        image_url = (
-            f"https://image.pollinations.ai/prompt/{encoded}"
-            f"?width=1280&height=1280&nologo=true&enhance=true"
-        )
-        try:
-            await update.message.reply_photo(photo=image_url,
-                                             caption=f"🎨 {text}",
-                                             reply_markup=main_keyboard())
-        except Exception as e:
-            await update.message.reply_text(f"⚠ Не удалось нарисовать: {e}",
-                                            reply_markup=main_keyboard())
+        user_last_prompt[chat_id] = text     # запоминаем промпт
+        await send_image(update, context, text)
         return
 
     # --- Режим ВИКИПЕДИЯ ---
